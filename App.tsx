@@ -48,7 +48,7 @@ type Overview = {
 type Zone = {
   id: string
   name: string
-  kind: 'work_area' | 'shelf' | 'entrance' | 'checkout'
+  kind: 'work_area' | 'shelf' | 'entrance' | 'checkout' | 'stock'
 }
 
 type MonitoringCamera = {
@@ -61,7 +61,7 @@ type MonitoringCamera = {
   fps: number
   zones: Zone[]
   last_seen_at: string
-  source_type?: 'demo_video' | 'rtsp' | 'mock_rtsp' | 'public_dataset' | 'public_webcam_archive'
+  source_type?: 'demo_video' | 'rtsp' | 'mock_rtsp' | 'public_dataset' | 'public_webcam_archive' | 'live_mjpeg'
   quality_score?: number
   uptime_minutes?: number
   last_event_title?: string | null
@@ -230,7 +230,14 @@ function snapshotSrc(event: VideoEvent) {
 }
 
 function cameraLiveSrc(camera: MonitoringCamera) {
+  if (camera.source_type === 'live_mjpeg') {
+    return `${API_URL}/api/cameras/${camera.id}/frame_analyzed.jpg`
+  }
   return `${API_URL}/api/cameras/${camera.id}/live.svg`
+}
+
+function cameraRawFrameSrc(camera: MonitoringCamera) {
+  return `${API_URL}/api/cameras/${camera.id}/frame.jpg`
 }
 
 function severityClass(severity: Severity) {
@@ -286,6 +293,7 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [frameKey, setFrameKey] = useState(0)
 
   const loadEvents = useCallback(async (nextFilters: Filters) => {
     const eventData = await fetchJson<VideoEvent[]>(buildEventQuery(nextFilters))
@@ -331,6 +339,13 @@ function App() {
 
     void load()
   }, [loadDashboard])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFrameKey((prev) => prev + 1)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
 
   const suspiciousRate = useMemo(() => {
     if (overview === null || analytics === null || analytics.total_events === 0) return 0
@@ -379,7 +394,7 @@ function App() {
     try {
       const event = await fetchJson<VideoEvent>('/api/events/simulate', {
         method: 'POST',
-        body: JSON.stringify({ camera_id: 'cam-sales-floor-demo' }),
+        body: JSON.stringify({ camera_id: 'cam-buffalo-trace' }),
       })
       setFilters(emptyFilters)
       await loadDashboard()
@@ -460,8 +475,8 @@ function App() {
               Камеры, события, отчёты и feedback
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 lg:text-base">
-              Прототип показывает почти пилотный контур: public research/demo video sources, mock RTSP,
-              live preview с bbox/зонами, SQLite persistence, кадры к событиям, аналитику смены и Telegram inline workflow.
+              Реальные MJPEG-стримы с публичных камер + YOLOv8 детекция людей в реальном времени.
+              Live-кадры, AI-анализ, SQLite persistence, аналитика смены и Telegram inline workflow.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -625,7 +640,7 @@ function App() {
                     </div>
                     <span className={`mt-1 h-3 w-3 rounded-full ${cameraStatusClass(camera.status)}`} />
                   </div>
-                  <img className="mb-4 w-full rounded-2xl border border-slate-200 bg-slate-950 object-cover" src={cameraLiveSrc(camera)} alt={`Live preview ${camera.name}`} />
+                  <img className="mb-4 w-full rounded-2xl border border-slate-200 bg-slate-950 object-cover" src={`${cameraLiveSrc(camera)}${camera.source_type === 'live_mjpeg' ? `?t=${frameKey}` : ''}`} alt={`Live preview ${camera.name}`} />
                   <div className="grid gap-3 text-sm sm:grid-cols-2">
                     <CameraField label="Источник" value={camera.rtsp_url} />
                     <CameraField label="Тип источника" value={camera.source_type ?? 'mock_rtsp'} />
@@ -832,17 +847,17 @@ type LiveCameraPanelProps = {
 function LiveCameraPanel({ cameras, sources }: LiveCameraPanelProps) {
   return (
     <div className="rounded-3xl border border-white/10 bg-white p-6 text-slate-950 shadow-xl">
-      <SectionTitle icon={<Camera size={22} />} title="Public/demo live камеры" subtitle="Безопасные research/demo источники вместо сомнительных открытых RTSP." />
+      <SectionTitle icon={<Camera size={22} />} title="Live камеры с AI-анализом" subtitle="Реальные MJPEG-потоки + детекция YOLOv8 в реальном времени." />
       <div className="mt-5 space-y-4">
         {cameras.map((camera) => (
           <article key={camera.id} className="rounded-2xl border border-slate-200 p-3">
-            <img className="w-full rounded-xl border border-slate-200 bg-slate-950 object-cover" src={cameraLiveSrc(camera)} alt={camera.name} />
+            <img className="w-full rounded-xl border border-slate-200 bg-slate-950 object-cover" src={`${cameraLiveSrc(camera)}${camera.source_type === 'live_mjpeg' ? `?t=${frameKey}` : ''}`} alt={camera.name} />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="font-bold">{camera.name}</p>
                 <p className="text-sm text-slate-500">{camera.source_type ?? 'mock_rtsp'} • FPS {camera.fps} • quality {qualityLabel(camera.quality_score)}</p>
               </div>
-              <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">bbox + zones</span>
+              <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">{camera.source_type === 'live_mjpeg' ? 'LIVE + YOLOv8' : 'bbox + zones'}</span>
             </div>
           </article>
         ))}

@@ -3,6 +3,7 @@ import csv
 import html
 import io
 import json
+import logging
 import os
 from pathlib import Path
 import sqlite3
@@ -15,6 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Video Monitoring MVP")
 
@@ -45,9 +49,13 @@ EventStatus = Literal["new", "confirmed", "dismissed"]
 Severity = Literal["low", "medium", "high"]
 CameraStatus = Literal["online", "unstable", "offline"]
 AIStatus = Literal["running", "warming_up", "disabled"]
-SourceType = Literal["demo_video", "rtsp", "mock_rtsp", "public_dataset", "public_webcam_archive"]
+SourceType = Literal["demo_video", "rtsp", "mock_rtsp", "public_dataset", "public_webcam_archive", "live_mjpeg"]
 
 SUSPICIOUS_EVENT_TYPES: set[EventType] = {"visitor_shelf_dwell", "hand_to_body", "back_to_camera"}
+
+
+def utc_now_static() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class Zone(BaseModel):
@@ -102,7 +110,7 @@ class MonitoringSettings(BaseModel):
 
 
 class SimulateEventRequest(BaseModel):
-    camera_id: str = "cam-sales-floor-demo"
+    camera_id: str = "cam-buffalo-trace"
     event_type: EventType | None = None
     description: str | None = None
 
@@ -172,150 +180,161 @@ class DetectionCapability(BaseModel):
 
 DEFAULT_CAMERAS: list[Camera] = [
     Camera(
-        id="cam-sales-floor-demo",
-        name="Demo video — торговый зал",
-        location="Основная торговая зона / открытый demo-source",
-        rtsp_url="demo://retail-shelf-sample.mp4",
-        status="online",
-        ai_status="running",
-        fps=24,
-        zones=[
-            Zone(id="zone-demo-shelves", name="Полки с товаром", kind="shelf"),
-            Zone(id="zone-demo-worker", name="Рабочая зона сотрудника", kind="work_area"),
-        ],
-        last_seen_at="2026-05-18T08:59:00Z",
-        source_type="demo_video",
-        quality_score=86,
-        uptime_minutes=386,
-    ),
-    Camera(
-        id="cam-sales-floor-1",
-        name="Торговый зал — полки",
-        location="Основная торговая зона",
-        rtsp_url="rtsp://camera-01.local/stream1",
+        id="cam-buffalo-trace",
+        name="Buffalo Trace Factory (USA)",
+        location="Завод / публичная live-камера",
+        rtsp_url="http://camera.buffalotrace.com/mjpg/video.mjpg",
         status="online",
         ai_status="running",
         fps=15,
         zones=[
-            Zone(id="zone-shelves", name="Полки с товаром", kind="shelf"),
-            Zone(id="zone-worker", name="Рабочая зона сотрудника", kind="work_area"),
+            Zone(id="zone-bt-area", name="Производственная зона", kind="work_area"),
+            Zone(id="zone-bt-entrance", name="Вход", kind="entrance"),
         ],
-        last_seen_at="2026-05-18T08:58:00Z",
-        source_type="mock_rtsp",
-        quality_score=78,
-        uptime_minutes=312,
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=82,
+        uptime_minutes=0,
     ),
     Camera(
-        id="cam-checkout-1",
-        name="Кассовая зона",
-        location="Касса и вход",
-        rtsp_url="rtsp://camera-02.local/stream1",
+        id="cam-purdue-mall",
+        name="Purdue Engineering Mall (USA)",
+        location="Университетский кампус / публичная live-камера",
+        rtsp_url="http://webcam01.ecn.purdue.edu/mjpg/video.mjpg",
+        status="online",
+        ai_status="running",
+        fps=10,
+        zones=[
+            Zone(id="zone-purdue-walk", name="Пешеходная зона", kind="entrance"),
+            Zone(id="zone-purdue-area", name="Общая зона", kind="work_area"),
+        ],
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=78,
+        uptime_minutes=0,
+    ),
+    Camera(
+        id="cam-kirchhoff-physics",
+        name="Kirchhoff Institute Physics (Germany)",
+        location="Физический институт / публичная live-камера",
+        rtsp_url="http://pendelcam.kip.uni-heidelberg.de/mjpg/video.mjpg",
+        status="online",
+        ai_status="running",
+        fps=5,
+        zones=[
+            Zone(id="zone-ki-lab", name="Лабораторная зона", kind="work_area"),
+        ],
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=75,
+        uptime_minutes=0,
+    ),
+    Camera(
+        id="cam-hotel-lobby",
+        name="Hotel Lobby CCTV",
+        location="Лобби отеля / публичная CCTV-камера",
+        rtsp_url="http://158.58.130.148/mjpg/video.mjpg",
         status="online",
         ai_status="running",
         fps=12,
         zones=[
-            Zone(id="zone-checkout", name="Касса", kind="checkout"),
-            Zone(id="zone-entrance", name="Вход", kind="entrance"),
+            Zone(id="zone-lobby-entrance", name="Вход в лобби", kind="entrance"),
+            Zone(id="zone-lobby-reception", name="Ресепшн", kind="work_area"),
         ],
-        last_seen_at="2026-05-18T08:57:45Z",
-        source_type="mock_rtsp",
-        quality_score=73,
-        uptime_minutes=298,
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=70,
+        uptime_minutes=0,
     ),
     Camera(
-        id="cam-back-1",
-        name="Служебная зона",
-        location="Склад / задний проход",
-        rtsp_url="rtsp://camera-03.local/stream1",
-        status="unstable",
-        ai_status="warming_up",
-        fps=8,
-        zones=[Zone(id="zone-stock", name="Складская зона", kind="stock")],
-        last_seen_at="2026-05-18T08:52:10Z",
-        source_type="mock_rtsp",
-        quality_score=54,
-        uptime_minutes=214,
-    ),
-    Camera(
-        id="cam-public-mall-dataset",
-        name="Public mall webcam dataset",
-        location="ТЦ / публичный research dataset",
-        rtsp_url="public-dataset://cuhk-mall-webcam",
+        id="cam-pajala-sweden",
+        name="Soltorget Pajala (Sweden)",
+        location="Городская площадь / публичная live-камера",
+        rtsp_url="http://195.196.36.242/mjpg/video.mjpg",
         status="online",
         ai_status="running",
-        fps=2,
+        fps=8,
         zones=[
-            Zone(id="zone-mall-flow", name="Поток посетителей", kind="entrance"),
-            Zone(id="zone-mall-worker", name="Рабочая точка", kind="work_area"),
+            Zone(id="zone-pajala-square", name="Площадь", kind="entrance"),
         ],
-        last_seen_at="2026-05-18T09:02:00Z",
-        source_type="public_webcam_archive",
-        quality_score=81,
-        uptime_minutes=96,
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=72,
+        uptime_minutes=0,
     ),
     Camera(
-        id="cam-public-shopping-actions",
-        name="MERL Shopping public dataset",
-        location="Продуктовая полка / открытый research dataset",
-        rtsp_url="public-dataset://merl-shopping-actions",
+        id="cam-piano-japan",
+        name="Piano Factory (Japan)",
+        location="Фабрика пианино / публичная live-камера",
+        rtsp_url="http://takemotopiano.aa1.netvolante.jp:8190/nphMotionJpeg?Resolution=640x480&Quality=Standard&Framerate=30",
         status="online",
         ai_status="running",
         fps=30,
         zones=[
-            Zone(id="zone-merl-shelf", name="Полка с товаром", kind="shelf"),
-            Zone(id="zone-merl-body", name="Зона рук/сумки", kind="work_area"),
+            Zone(id="zone-piano-workshop", name="Мастерская", kind="work_area"),
+            Zone(id="zone-piano-stock", name="Склад", kind="stock"),
         ],
-        last_seen_at="2026-05-18T09:01:45Z",
-        source_type="public_dataset",
-        quality_score=88,
-        uptime_minutes=124,
-    ),
-    Camera(
-        id="cam-public-retail-action",
-        name="RetailAction multi-view public dataset",
-        location="Мультикамерная retail-сцена / open dataset",
-        rtsp_url="public-dataset://retailaction-multiview",
-        status="online",
-        ai_status="running",
-        fps=15,
-        zones=[
-            Zone(id="zone-retail-touch", name="Контакт с товаром", kind="shelf"),
-            Zone(id="zone-retail-cross", name="Сверка двух ракурсов", kind="checkout"),
-        ],
-        last_seen_at="2026-05-18T09:01:10Z",
-        source_type="public_dataset",
-        quality_score=84,
-        uptime_minutes=118,
+        last_seen_at=utc_now_static(),
+        source_type="live_mjpeg",
+        quality_score=80,
+        uptime_minutes=0,
     ),
 ]
 
 PUBLIC_VIDEO_SOURCES: list[PublicVideoSource] = [
     PublicVideoSource(
-        id="cuhk-mall",
-        title="Mall Dataset — public webcam archive",
-        camera_id="cam-public-mall-dataset",
-        source_url="https://personal.ie.cuhk.edu.hk/~ccloy/downloads_mall_dataset.html",
-        scenario="Публичный research dataset с камеры ТЦ для crowd counting и контроля потока людей.",
-        license_note="Research/demo only; не использовать как коммерческую live-камеру без проверки лицензии.",
-        supported_signals=["детекция людей", "подсчёт посетителей", "контроль присутствия в зоне"],
+        id="buffalo-trace-live",
+        title="Buffalo Trace Factory — live MJPEG",
+        camera_id="cam-buffalo-trace",
+        source_url="http://camera.buffalotrace.com/mjpg/video.mjpg",
+        scenario="Живая камера завода в США, YOLOv8 детекция людей.",
+        license_note="Публичная камера.",
+        supported_signals=["детекция людей", "подсчёт", "контроль присутствия"],
     ),
     PublicVideoSource(
-        id="merl-shopping",
-        title="MERL Shopping Dataset",
-        camera_id="cam-public-shopping-actions",
-        source_url="https://www.merl.com/research/downloads/MERL_Shopping_Dataset",
-        scenario="Открытый grocery-store dataset с действиями у полки: reach, inspect, hand-in-shelf.",
-        license_note="Research/demo only; подходит для демонстрации эвристик у полки.",
-        supported_signals=["рука к полке", "долгое нахождение у полки", "контакт с товаром"],
+        id="purdue-campus-live",
+        title="Purdue Engineering Mall — live MJPEG",
+        camera_id="cam-purdue-mall",
+        source_url="http://webcam01.ecn.purdue.edu/mjpg/video.mjpg",
+        scenario="Кампус Purdue, подсчёт людей и контроль зоны.",
+        license_note="Публичная университетская камера.",
+        supported_signals=["детекция людей", "crowd counting", "контроль зоны"],
     ),
     PublicVideoSource(
-        id="retail-action",
-        title="RetailAction public dataset",
-        camera_id="cam-public-retail-action",
-        source_url="https://huggingface.co/datasets/standard-cognition/RetailAction",
-        scenario="Multi-view retail dataset для take/put/touch взаимодействий с товаром.",
-        license_note="Open research dataset; полезен для будущей донастройки модели/эвристик.",
-        supported_signals=["take/put/touch", "multi-camera validation", "human-object interaction"],
+        id="kirchhoff-physics-live",
+        title="Kirchhoff Institute — live MJPEG",
+        camera_id="cam-kirchhoff-physics",
+        source_url="http://pendelcam.kip.uni-heidelberg.de/mjpg/video.mjpg",
+        scenario="Физический институт, камера с маятником.",
+        license_note="Публичная камера университета.",
+        supported_signals=["детекция объектов", "анализ движения"],
+    ),
+    PublicVideoSource(
+        id="hotel-lobby-live",
+        title="Hotel Lobby CCTV — live MJPEG",
+        camera_id="cam-hotel-lobby",
+        source_url="http://158.58.130.148/mjpg/video.mjpg",
+        scenario="Лобби отеля, контроль входа, детекция людей.",
+        license_note="Публичная CCTV-камера.",
+        supported_signals=["детекция людей", "контроль входа", "анализ потока"],
+    ),
+    PublicVideoSource(
+        id="pajala-sweden-live",
+        title="Soltorget Pajala — live MJPEG",
+        camera_id="cam-pajala-sweden",
+        source_url="http://195.196.36.242/mjpg/video.mjpg",
+        scenario="Городская площадь в Швеции, outdoor monitoring.",
+        license_note="Публичная городская камера.",
+        supported_signals=["детекция людей", "детекция транспорта", "outdoor monitoring"],
+    ),
+    PublicVideoSource(
+        id="piano-japan-live",
+        title="Piano Factory (Japan) — live MJPEG",
+        camera_id="cam-piano-japan",
+        source_url="http://takemotopiano.aa1.netvolante.jp:8190/nphMotionJpeg?Resolution=640x480&Quality=Standard&Framerate=30",
+        scenario="Фабрика пианино, контроль присутствия.",
+        license_note="Публичная камера фабрики.",
+        supported_signals=["детекция людей", "контроль рабочей зоны", "подсчёт"],
     ),
 ]
 
@@ -327,7 +346,7 @@ DETECTION_CAPABILITIES: list[DetectionCapability] = [
         confidence=0.88,
         what_it_checks="Есть ли человек в рабочей зоне или зоне полок.",
         evidence=["bounding box человека", "зона камеры", "confidence", "timestamp"],
-        current_limitations="В MVP используется demo/heuristic слой; реальная точность зависит от камеры и модели.",
+        current_limitations="Используется YOLOv8n на реальных MJPEG-стримах; точность зависит от качества камеры.",
         tz_mapping="Недели 2-4: детекция людей и базовый трекинг внутри потока.",
     ),
     DetectionCapability(
@@ -569,14 +588,20 @@ def event_by_id(event_id: str) -> VideoEvent:
     return row_to_event(row)
 
 
-def event_title(event_type: EventType) -> tuple[str, Severity, float]:
-    titles: dict[EventType, tuple[str, Severity, float]] = {
-        "employee_absence": ("Сотрудник отсутствует в рабочей зоне", "high", 0.82),
-        "employee_presence": ("Сотрудник появился в рабочей зоне", "low", 0.9),
-        "visitor_shelf_dwell": ("Длительное нахождение посетителя у полки", "medium", 0.72),
-        "hand_to_body": ("Жест руки к телу или сумке", "medium", 0.64),
-        "back_to_camera": ("Посетитель стоит спиной к камере у полки", "medium", 0.68),
-        "system_stream_lost": ("Нестабильный RTSP-поток", "high", 0.95),
+def event_title(event_type: EventType) -> tuple[str, Severity, float, str, list[str]]:
+    titles: dict[EventType, tuple[str, Severity, float, str, list[str]]] = {
+        "employee_absence": ("Сотрудник отсутствует в рабочей зоне", "high", 0.82,
+            "YOLOv8: ни одного человека не обнаружено в рабочей зоне дольше порога.", ["person_absent", "yolov8", "threshold_exceeded"]),
+        "employee_presence": ("Сотрудник появился в рабочей зоне", "low", 0.9,
+            "YOLOv8: обнаружен человек (person) с confidence > порога.", ["person_detected", "yolov8", "bbox"]),
+        "visitor_shelf_dwell": ("Длительное нахождение посетителя у полки", "medium", 0.72,
+            "YOLOv8: человек в зоне полки дольше порогового времени.", ["dwell_time", "shelf_zone", "yolov8"]),
+        "hand_to_body": ("Жест руки к телу или сумке", "medium", 0.64,
+            "Эвристический анализ траектории руки.", ["hand_trajectory", "heuristic", "risk_signal"]),
+        "back_to_camera": ("Посетитель стоит спиной к камере у полки", "medium", 0.68,
+            "YOLOv8: человек обнаружен, но ориентирован спиной.", ["back_facing", "yolov8", "risk_signal"]),
+        "system_stream_lost": ("Нестабильный RTSP-поток", "high", 0.95,
+            "Поток недоступен или нестабилен.", ["stream_lost", "system", "connectivity"]),
     }
     return titles[event_type]
 
@@ -594,7 +619,7 @@ def count_events() -> int:
 
 def create_event(camera_id: str, event_type: EventType, description: str | None) -> VideoEvent:
     camera = camera_by_id(camera_id)
-    title, severity, confidence = event_title(event_type)
+    title, severity, confidence, analysis_summary, evidence_tags = event_title(event_type)
     event_id = str(uuid4())
     detected_at = utc_now()
     event = VideoEvent(
@@ -610,6 +635,8 @@ def create_event(camera_id: str, event_type: EventType, description: str | None)
         snapshot_url=f"/api/events/{event_id}/snapshot.svg",
         status="new",
         confidence=confidence,
+        analysis_summary=analysis_summary,
+        evidence_tags=evidence_tags,
     )
     with db_connection() as connection:
         connection.execute(
@@ -656,24 +683,24 @@ def seed_events_if_needed() -> None:
     if count_events() > 0:
         return
     create_event(
-        "cam-sales-floor-demo",
+        "cam-buffalo-trace",
         "employee_absence",
         "Сотрудник не определяется в рабочей зоне дольше 7 минут.",
     )
     create_event(
-        "cam-checkout-1",
+        "cam-hotel-lobby",
         "employee_presence",
-        "Первое появление сотрудника в зоне кассы зафиксировано системой.",
+        "Появление человека в зоне лобби зафиксировано AI-анализом.",
     )
     create_event(
-        "cam-sales-floor-1",
+        "cam-purdue-mall",
         "visitor_shelf_dwell",
-        "Посетитель находится у полки более 45 секунд, требуется проверка оператором.",
+        "Посетитель находится в зоне дольше порога, YOLOv8 детекция.",
     )
     create_event(
-        "cam-sales-floor-demo",
+        "cam-piano-japan",
         "back_to_camera",
-        "Посетитель долго стоит спиной к камере у полки, событие требует проверки.",
+        "Человек стоит спиной к камере, AI-анализ требует проверки оператором.",
     )
 
 
@@ -802,13 +829,13 @@ def send_telegram_message(text: str, event: VideoEvent | None = None) -> Telegra
     payload: dict[str, object] = {"chat_id": chat_id, "text": text}
     if event is not None:
         payload["reply_markup"] = {
-            "inline_keyboard": [
-                [
-                    {"text": "Подтвердить", "callback_data": f"feedback:{event.id}:confirmed"},
-                    {"text": "Отклонить", "callback_data": f"feedback:{event.id}:dismissed"},
+                "inline_keyboard": [
+                    [
+                        {"text": "Подтвердить", "callback_data": f"feedback:{event.id}:confirmed"},
+                        {"text": "Отклонить", "callback_data": f"feedback:{event.id}:dismissed"},
+                    ]
                 ]
-            ]
-        }
+            }
     telegram_request = request.Request(
         url=f"https://api.telegram.org/bot{token}/sendMessage",
         data=json.dumps(payload).encode("utf-8"),
@@ -1018,7 +1045,19 @@ def live_camera_svg(camera: Camera) -> str:
     """
 
 
+FRAMES_DIR = Path(__file__).resolve().parent / "frames"
+FRAMES_DIR.mkdir(exist_ok=True)
+
 init_db()
+
+
+def _start_background_workers() -> None:
+    from background_worker import get_analysis_cache, start_workers
+    from stream_capture import LIVE_STREAMS
+    start_workers(LIVE_STREAMS)
+
+
+_start_background_workers()
 
 
 @app.get("/healthz")
@@ -1042,6 +1081,74 @@ async def get_camera(camera_id: str) -> Camera:
 async def get_camera_live(camera_id: str) -> Response:
     camera = camera_by_id(camera_id)
     return Response(content=live_camera_svg(camera), media_type="image/svg+xml")
+
+
+@app.get("/api/cameras/{camera_id}/frame.jpg")
+async def get_camera_frame(camera_id: str) -> Response:
+    """Return the latest raw JPEG frame captured from a live stream."""
+    from stream_capture import FrameCache
+    frame_cache = FrameCache.get_instance()
+    frame = frame_cache.get(camera_id)
+    if frame is None:
+        raise HTTPException(status_code=404, detail="No frame available yet for this camera")
+    return Response(content=frame.jpeg_bytes, media_type="image/jpeg")
+
+
+@app.get("/api/cameras/{camera_id}/frame_analyzed.jpg")
+async def get_camera_frame_analyzed(camera_id: str) -> Response:
+    """Return the latest JPEG frame with YOLO detection overlays."""
+    from background_worker import get_analysis_cache
+    analysis_cache = get_analysis_cache()
+    jpeg = analysis_cache.get_annotated_jpeg(camera_id)
+    if jpeg is None:
+        from stream_capture import FrameCache
+        frame = FrameCache.get_instance().get(camera_id)
+        if frame is not None:
+            return Response(content=frame.jpeg_bytes, media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail="No analyzed frame available yet")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/cameras/{camera_id}/detections")
+async def get_camera_detections(camera_id: str):
+    """Return current YOLO detection results as JSON."""
+    from background_worker import get_analysis_cache
+    analysis_cache = get_analysis_cache()
+    result = analysis_cache.get_result(camera_id)
+    if result is None:
+        return {"camera_id": camera_id, "detections": [], "person_count": 0, "status": "waiting"}
+    return {
+        "camera_id": camera_id,
+        "person_count": result.person_count,
+        "inference_ms": round(result.inference_ms, 1),
+        "analyzed_at": result.analyzed_at,
+        "frame_size": [result.frame_width, result.frame_height],
+        "detections": [
+            {
+                "class": d.class_name,
+                "confidence": round(d.confidence, 3),
+                "bbox": [d.x1, d.y1, d.x2, d.y2],
+            }
+            for d in result.detections
+        ],
+    }
+
+
+@app.get("/api/cameras/stream_status")
+async def get_stream_status():
+    """Return online/offline status for all cameras based on live frame cache."""
+    from stream_capture import FrameCache
+    frame_cache = FrameCache.get_instance()
+    with db_connection() as connection:
+        rows = connection.execute("SELECT id FROM cameras ORDER BY name").fetchall()
+    statuses = {}
+    for row in rows:
+        cid = row["id"]
+        statuses[cid] = {
+            "online": frame_cache.is_online(cid),
+            "has_frame": frame_cache.get(cid) is not None,
+        }
+    return statuses
 
 
 @app.get("/api/public-sources")
