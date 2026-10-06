@@ -9,9 +9,9 @@ DEFAULT_SETTINGS = MonitoringSettings()
 
 def default_sources() -> list[CameraSource]:
     sources = [
-        CameraSource(id="cam-public-rtsp-kz", name="RTSP.KZ — публичное демо / ашық демо",
-            location="Публичный HLS-поток / Ашық HLS ағыны",
-            url="https://rtsp.kz/hls/demo/stream.m3u8", source_type="hls", fps_limit=2),
+        CameraSource(id="cam-public-caltrans-hammer", name="Caltrans — Hammer Lane / ашық жол камерасы",
+            location="США · публичная дорожная камера / АҚШ · ашық жол камерасы",
+            url="https://wzmedia.dot.ca.gov/D10/SJ_SB99_HammerLnLoopOffRamp.stream/playlist.m3u8", source_type="hls", fps_limit=2),
         CameraSource(id="cam-public-yellowstone-arch", name="Yellowstone — северный вход / солтүстік кіреберіс",
             location="США · JPEG раз в минуту / АҚШ · минутына бір кадр",
             url="https://www.nps.gov/webcams-yell/mammoth_arch.jpg", source_type="jpeg_snapshot", fps_limit=1),
@@ -110,7 +110,7 @@ def default_sources() -> list[CameraSource]:
 
 
 PUBLIC_SOURCE_PAGES = {
-    "cam-public-rtsp-kz": "https://rtsp.kz/",
+    "cam-public-caltrans-hammer": "https://dot.ca.gov/programs/traffic-operations/traveler-information/cwwp",
     "cam-public-yellowstone-arch": "https://www.nps.gov/media/webcam/view.htm?id=81B468BC-1DD8-B71B-0BBA4C383E179188",
     "cam-public-yellowstone-electric": "https://www.nps.gov/media/webcam/view.htm?id=81B468AB-1DD8-B71B-0BE84D8E8E0F1112",
 }
