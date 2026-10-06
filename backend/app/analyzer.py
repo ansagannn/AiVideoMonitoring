@@ -26,7 +26,6 @@ def _get_model():
         return None
     if _model is None:
         try:
-            from ultralytics import YOLO
             default_model_path = Path(__file__).resolve().parents[1] / "models" / "yolov8n.pt"
             model_path = Path(os.getenv("AI_MONITOR_YOLO_MODEL", str(default_model_path)))
             auto_download = os.getenv("AI_MONITOR_YOLO_AUTO_DOWNLOAD", "0") == "1"
@@ -38,6 +37,12 @@ def _get_model():
                     model_path,
                 )
                 return None
+            if model_path.suffix == ".onnx":
+                cv2.setNumThreads(1)
+                _model = cv2.dnn.readNetFromONNX(str(model_path))
+                logger.info("YOLOv8n ONNX loaded using OpenCV DNN")
+                return _model
+            from ultralytics import YOLO
             logger.info("Loading YOLOv8n model...")
             _model = YOLO(str(model_path))
             logger.info("YOLOv8n model loaded.")
@@ -97,6 +102,8 @@ def analyze_frame(camera_id: str, frame: np.ndarray, confidence_threshold: float
             frame_height=h,
         )
 
+    if isinstance(model, cv2.dnn.Net):
+        return _analyze_onnx(camera_id, frame, model, confidence_threshold)
     t0 = time.time()
     try:
         results = model(frame, verbose=False, conf=confidence_threshold)
@@ -185,3 +192,40 @@ def frame_to_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """Encode a numpy frame to JPEG bytes."""
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return buf.tobytes()
+
+
+def _decode_people(output, scale, width, height, threshold):
+    rows = np.asarray(output).reshape(84, -1).T
+    boxes, scores = [], []
+    for row in rows:
+        class_id = int(np.argmax(row[4:]))
+        score = float(row[4 + class_id])
+        if class_id != 0 or score < threshold:
+            continue
+        cx, cy, w, h = row[:4] * scale
+        x1, y1 = max(0, int(cx-w/2)), max(0, int(cy-h/2))
+        x2, y2 = min(width, int(cx+w/2)), min(height, int(cy+h/2))
+        if x2 > x1 and y2 > y1:
+            boxes.append([x1,y1,x2-x1,y2-y1])
+            scores.append(score)
+    keep = cv2.dnn.NMSBoxes(boxes, scores, threshold, 0.45)
+    return [Detection(0, "person", scores[int(i)], boxes[int(i)][0], boxes[int(i)][1],
+                      boxes[int(i)][0]+boxes[int(i)][2], boxes[int(i)][1]+boxes[int(i)][3])
+            for i in np.asarray(keep).flatten()]
+
+
+def _analyze_onnx(camera_id, frame, model, threshold):
+    start = time.monotonic()
+    height, width = frame.shape[:2]
+    size = max(height, width)
+    square = np.full((size, size, 3), 114, dtype=np.uint8)
+    square[:height, :width] = frame
+    try:
+        model.setInput(cv2.dnn.blobFromImage(square, 1/255.0, (320,320), swapRB=True, crop=False))
+        people = _decode_people(model.forward(), size/320, width, height, threshold)
+        return AnalysisResult(camera_id=camera_id, detections=people, model_available=True,
+            person_count=len(people), inference_ms=(time.monotonic()-start)*1000,
+            frame_width=width, frame_height=height)
+    except Exception as exc:
+        logger.warning("ONNX inference failed for %s: %s", camera_id, exc)
+        return AnalysisResult(camera_id=camera_id, frame_width=width, frame_height=height)

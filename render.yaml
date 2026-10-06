@@ -1,4 +1,4 @@
-# Free camera-viewing demo. No server-side YOLO; history is ephemeral.
+# Free demo with YOLOv8n ONNX via OpenCV DNN; history is ephemeral.
 services:
   - type: web
     name: ai-camera-safety-demo

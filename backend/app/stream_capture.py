@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -141,6 +142,9 @@ _captures: dict[str, tuple[str, object]] = {}
 
 
 def close_captures(active_ids=None):
+    for camera_id in list(_hls_captures):
+        if active_ids is None or camera_id not in active_ids:
+            _hls_captures.pop(camera_id).release()
     for camera_id in list(_captures):
         if active_ids is None or camera_id not in active_ids:
             _captures.pop(camera_id)[1].release()
@@ -189,7 +193,9 @@ def grab_frame(source: StreamSource) -> CapturedFrame | None:
             numpy_frame=frame,
         )
 
-    if source.stream_type in {"rtsp", "hls"} or source.url.startswith("rtsp://"):
+    if source.stream_type == "hls":
+        raw = _grab_hls_frame(source.camera_id, source.url)
+    elif source.stream_type == "rtsp" or source.url.startswith("rtsp://"):
         raw = _grab_video_frame(source.camera_id, source.url)
     elif source.stream_type in {"demo_video", "public_dataset", "public_webcam_archive"}:
         raw = _grab_video_frame(source.camera_id, source.url, loop=True)
@@ -250,3 +256,70 @@ class FrameCache:
         if frame is None:
             return False
         return (time.time() - frame.captured_at) < 120
+
+
+class HlsCapture:
+    """Drain FFmpeg continuously so low-rate inference always sees a recent frame."""
+    def __init__(self, url):
+        self.url, self.frame, self.at = url, None, 0.0
+        self.error, self.started_at = None, time.monotonic()
+        self.process = subprocess.Popen([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-rw_timeout", "15000000", "-i", url, "-an", "-threads", "1",
+            "-vf", "fps=2,scale=640:-2", "-c:v", "mjpeg", "-q:v", "5",
+            "-f", "image2pipe", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._errors, daemon=True).start()
+
+    def _read(self):
+        buf = bytearray()
+        while self.process.stdout:
+            chunk = self.process.stdout.read1(16384)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            while True:
+                start = buf.find(b"\xff\xd8")
+                end = buf.find(b"\xff\xd9", max(start, 0))
+                if start < 0 or end < 0:
+                    break
+                self.frame, self.at = bytes(buf[start:end+2]), time.monotonic()
+                del buf[:end+2]
+            if len(buf) > 2_000_000:
+                buf.clear()
+
+    def _errors(self):
+        for line in iter(self.process.stderr.readline, b""):
+            # Do not log URLs, which can contain camera credentials.
+            self.error = "FFmpeg could not decode the HLS stream"
+        if self.process.poll() not in (None, 0):
+            logger.warning("HLS decoder exited with code %s", self.process.returncode)
+
+    def release(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+
+
+_hls_captures = {}
+_hls_retry_at = {}
+
+
+def _grab_hls_frame(camera_id, url):
+    now = time.monotonic()
+    entry = _hls_captures.get(camera_id)
+    if entry and (entry.url != url or entry.process.poll() is not None or
+                  now - max(entry.at, entry.started_at) > 30):
+        entry.release()
+        _hls_captures.pop(camera_id, None)
+        _hls_retry_at[camera_id] = now + 10
+        entry = None
+    if entry is None:
+        if now < _hls_retry_at.get(camera_id, 0):
+            return None
+        entry = _hls_captures[camera_id] = HlsCapture(url)
+    return entry.frame if now-entry.at < 5 else None

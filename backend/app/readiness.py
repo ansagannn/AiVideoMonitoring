@@ -12,7 +12,7 @@ def model_status():
     return {
         'model_loaded': analyzer._model is not None,
         'weights_present': path.is_file(),
-        'dependency_present': importlib.util.find_spec('ultralytics') is not None,
+        'dependency_present': importlib.util.find_spec('cv2' if path.suffix == '.onnx' else 'ultralytics') is not None,
         'load_failed': analyzer._model_failed,
         'action_method': 'temporal_bbox_heuristics',
         'validated_on_client_cameras': False,

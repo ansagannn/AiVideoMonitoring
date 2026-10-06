@@ -162,7 +162,7 @@ def test_public_sources_and_hls_capture_dispatch():
     assert len([s for s in public if s.source_type == 'jpeg_snapshot']) == 2
     hls = next(s for s in public if s.source_type == 'hls')
     _, jpeg = cv2.imencode('.jpg', np.zeros((40,60,3), dtype=np.uint8))
-    with patch('stream_capture._grab_video_frame', return_value=jpeg.tobytes()) as video, patch('stream_capture._grab_mjpeg_frame') as mjpeg:
+    with patch('stream_capture._grab_hls_frame', return_value=jpeg.tobytes()) as video, patch('stream_capture._grab_mjpeg_frame') as mjpeg:
         frame = grab_frame(StreamSource(hls.id, hls.name, hls.url, 'hls'))
         assert frame.width == 60 and frame.height == 40
         video.assert_called_once_with(hls.id, hls.url)
@@ -198,3 +198,17 @@ def test_free_demo_skips_yolo_import(monkeypatch):
     monkeypatch.setenv('AI_MONITOR_PUBLIC_ONLY','1')
     from defaults import default_sources
     assert all(s.id.startswith('cam-public-') for s in default_sources())
+
+
+def test_onnx_person_boxes_rescale_filter_and_suppress():
+    from analyzer import _decode_people
+    output = np.zeros((1,84,3), dtype=np.float32)
+    output[0,:4,0] = [80,100,40,80]
+    output[0,4,0] = .9
+    output[0,:4,1] = [81,101,40,80]
+    output[0,4,1] = .8
+    output[0,:4,2] = [200,200,40,40]
+    output[0,6,2] = .95  # car: ignore
+    detections = _decode_people(output, 2, 640, 480, .35)
+    assert len(detections) == 1
+    assert [detections[0].x1, detections[0].y1, detections[0].x2, detections[0].y2] == [120,120,200,280]
