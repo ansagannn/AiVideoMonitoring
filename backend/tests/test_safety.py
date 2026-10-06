@@ -212,3 +212,17 @@ def test_onnx_person_boxes_rescale_filter_and_suppress():
     detections = _decode_people(output, 2, 640, 480, .35)
     assert len(detections) == 1
     assert [detections[0].x1, detections[0].y1, detections[0].x2, detections[0].y2] == [120,120,200,280]
+
+
+def test_caltrans_catalog_uses_official_stream_urls_only():
+    import json
+    import stream_capture as capture
+    capture._catalogs.clear()
+    payload = {"data":[{"cctv":{"imageData":{"streamingVideoURL":"https://wzmedia.dot.ca.gov/D10/test.stream/playlist.m3u8"}}},
+                       {"streamingVideoURL":"https://untrusted.example/playlist.m3u8"}]}
+    with patch('stream_capture.urlopen') as fetch:
+        fetch.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        url = capture._catalog_stream('catalog-test', 'https://cwwp2.dot.ca.gov/data/d10/cctv/cctvStatusD10.json')
+    assert url == 'https://wzmedia.dot.ca.gov/D10/test.stream/playlist.m3u8'
+    assert len(capture._catalogs['catalog-test']['urls']) == 1
+    capture._catalogs.clear()
