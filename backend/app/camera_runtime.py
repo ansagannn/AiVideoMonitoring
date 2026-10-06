@@ -33,6 +33,7 @@ class CameraRuntime:
         self._rules = SafetyEngine()
         self._analysis_status: dict[str, str] = {}
         self._analysis_jpeg: dict[str, bytes] = {}
+        self._reported_inference: set[str] = set()
 
     def start(self) -> None:
         self.reload_sources()
@@ -133,6 +134,8 @@ class CameraRuntime:
             self._stop.wait(0.05)
 
     def _mark_status(self, state: RuntimeCameraState, *, online: bool, error: str | None) -> None:
+        if state.status.online != online:
+            logger.info("Camera %s capture %s", state.source.id, "connected" if online else "disconnected")
         state.last_error = error
         state.status = StreamStatus(online=online, has_frame=online, last_frame_at=utc_now() if online else state.status.last_frame_at, error=error)
         db.update_camera_runtime(
@@ -146,6 +149,9 @@ class CameraRuntime:
 
     def _analyze(self, source: CameraSource, frame: CapturedFrame) -> tuple[list[RuntimeDetection], bytes]:
         result = analyze_frame(source.id, frame.numpy_frame, db.load_settings().confidence_threshold)
+        if result.model_available and source.id not in self._reported_inference:
+            logger.info("Camera %s YOLO inference succeeded: %.0fms", source.id, result.inference_ms)
+            self._reported_inference.add(source.id)
         self._analysis_status[source.id] = "demo" if source.source_type == "retail_scene" else ("running" if result.model_available else "model_unavailable")
         detections = [
             RuntimeDetection(
