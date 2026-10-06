@@ -9,9 +9,9 @@ DEFAULT_SETTINGS = MonitoringSettings()
 
 def default_sources() -> list[CameraSource]:
     sources = [
-        CameraSource(id="cam-public-caltrans-hammer", name="Caltrans — Hammer Lane / ашық жол камерасы",
+        CameraSource(id="cam-public-caltrans-hammer", name="Caltrans — публичная дорожная камера / ашық жол камерасы",
             location="США · публичная дорожная камера / АҚШ · ашық жол камерасы",
-            url="https://wzmedia.dot.ca.gov/D10/SJ_SB99_HammerLnLoopOffRamp.stream/playlist.m3u8", source_type="hls", fps_limit=2),
+            url="https://cwwp2.dot.ca.gov/data/d10/cctv/cctvStatusD10.json", source_type="hls", fps_limit=2),
         CameraSource(id="cam-public-yellowstone-arch", name="Yellowstone — северный вход / солтүстік кіреберіс",
             location="США · JPEG раз в минуту / АҚШ · минутына бір кадр",
             url="https://www.nps.gov/webcams-yell/mammoth_arch.jpg", source_type="jpeg_snapshot", fps_limit=1),

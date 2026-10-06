@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import json
+from urllib.parse import urlsplit
 import subprocess
 import re
 import threading
@@ -266,7 +268,7 @@ class HlsCapture:
         self.error, self.started_at = None, time.monotonic()
         self.process = subprocess.Popen([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-            "-rw_timeout", "15000000", "-i", url, "-an", "-threads", "1",
+            "-rw_timeout", "15000000", "-threads", "1", "-i", url, "-an", "-threads", "1", "-filter_threads", "1",
             "-vf", "fps=2,scale=640:-2", "-c:v", "mjpeg", "-q:v", "5",
             "-f", "image2pipe", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         threading.Thread(target=self._read, daemon=True).start()
@@ -321,6 +323,10 @@ _hls_retry_at = {}
 
 def _grab_hls_frame(camera_id, url):
     now = time.monotonic()
+    if urlsplit(url).hostname == "cwwp2.dot.ca.gov" and url.endswith(".json"):
+        url = _catalog_stream(camera_id, url)
+        if not url:
+            return None
     entry = _hls_captures.get(camera_id)
     if entry and (entry.url != url or entry.process.poll() is not None or
                   now - max(entry.at, entry.started_at) > 30):
@@ -333,3 +339,46 @@ def _grab_hls_frame(camera_id, url):
             return None
         entry = _hls_captures[camera_id] = HlsCapture(url)
     return entry.frame if now-entry.at < 5 else None
+
+
+_catalogs = {}
+
+
+def _catalog_stream(camera_id, catalog_url):
+    """Resolve only official Caltrans URLs; retry another camera after decoder failure."""
+    now = time.monotonic()
+    state = _catalogs.get(camera_id)
+    if state is None or now-state["loaded"] > 3600:
+        try:
+            with urlopen(Request(catalog_url, headers={"User-Agent": _USER_AGENT}), timeout=8) as response:
+                document = json.loads(response.read(5_000_000))
+            urls = []
+            def visit(node):
+                if isinstance(node, dict):
+                    for key, value in node.items():
+                        if key.lower() == "streamingvideourl" and isinstance(value, str):
+                            parsed = urlsplit(value)
+                            if parsed.scheme == "https" and parsed.hostname == "wzmedia.dot.ca.gov" and ".m3u8" in parsed.path:
+                                urls.append(value)
+                        elif isinstance(value, (dict, list)):
+                            visit(value)
+                elif isinstance(node, list):
+                    for child in node:
+                        visit(child)
+            visit(document)
+            state = _catalogs[camera_id] = {"loaded":now, "urls":list(dict.fromkeys(urls)), "index":0}
+            logger.info("Caltrans public catalog resolved %s video streams", len(state["urls"]))
+        except (URLError, OSError, ValueError) as exc:
+            logger.warning("Caltrans public camera catalog unavailable: %s", type(exc).__name__)
+            _catalogs[camera_id] = {"loaded":now-3540, "urls":[], "index":0}
+            return None
+    urls = state["urls"]
+    if not urls:
+        return None
+    capture = _hls_captures.get(camera_id)
+    if capture and (capture.process.poll() is not None or now-max(capture.at,capture.started_at)>30):
+        capture.release()
+        _hls_captures.pop(camera_id, None)
+        state["index"] = (state["index"]+1) % len(urls)
+        _hls_retry_at[camera_id] = now+2
+    return urls[state["index"]]
