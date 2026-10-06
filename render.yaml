@@ -1,0 +1,17 @@
+# Free demo with YOLOv8n ONNX via OpenCV DNN; history is ephemeral.
+services:
+  - type: web
+    name: ai-camera-safety-demo
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile.demo
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: AI_MONITOR_PASSWORD_ADMIN
+        sync: false
+      - key: AI_MONITOR_PASSWORD_MANAGER
+        sync: false
+      - key: AI_MONITOR_PASSWORD_OPERATOR
+        sync: false

@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      AI_MONITOR_PASSWORD_ADMIN: ${AI_MONITOR_PASSWORD_ADMIN:-admin123}
+      AI_MONITOR_PASSWORD_OPERATOR: ${AI_MONITOR_PASSWORD_OPERATOR:-operator123}
+      AI_MONITOR_PASSWORD_MANAGER: ${AI_MONITOR_PASSWORD_MANAGER:-manager123}
+      AI_MONITOR_YOLO_AUTO_DOWNLOAD: ${AI_MONITOR_YOLO_AUTO_DOWNLOAD:-0}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    volumes:
+      - safety-data:/data
+      - ./backend/models:/models
+      - ./backend/videos:/videos:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  safety-data:

@@ -1,0 +1,61 @@
+/.venv/
+/backend/.venv/
+/frontend/node_modules/
+/frontend/dist/
+/backend/monitoring.db
+/backend/monitoring.db-journal
+/backend/app/frames/
+/models/
+*.pyc
+__pycache__/
+.env
+.DS_Store
+.vscode/
+/.idea/
+dist/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/.pytest_cache/# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts
+backend/monitoring.db
+backend/monitoring.db-journal
+backend/frames/
+backend/yolov8n.pt
+backend/.yolo_cache/
+
+# Models / weights
+*.pt
+*.onnx
+
+# Env files (keep .env.example committed if any)
+.env.local
+.env.*.local
