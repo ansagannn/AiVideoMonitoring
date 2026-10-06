@@ -158,7 +158,7 @@ def test_camera_readiness_never_marks_demo_or_stale_frame_as_real_ai():
 def test_public_sources_and_hls_capture_dispatch():
     from defaults import default_sources, PUBLIC_SOURCE_PAGES
     public = [s for s in default_sources() if s.id in PUBLIC_SOURCE_PAGES]
-    assert len(public) == 3 and all(s.enabled for s in public)
+    assert len(public) == 4 and all(s.enabled for s in public)
     assert len([s for s in public if s.source_type == 'jpeg_snapshot']) == 2
     hls = next(s for s in public if s.source_type == 'hls')
     _, jpeg = cv2.imencode('.jpg', np.zeros((40,60,3), dtype=np.uint8))

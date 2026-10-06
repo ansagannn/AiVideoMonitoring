@@ -9,6 +9,9 @@ DEFAULT_SETTINGS = MonitoringSettings()
 
 def default_sources() -> list[CameraSource]:
     sources = [
+        CameraSource(id="cam-public-khanshatyr-left", name="Хан Шатыр — внутренняя камера / ішкі камера",
+            location="Астана · ТРЦ Хан Шатыр · левая камера / сол жақ камера",
+            url="https://shatyr-stream.smarty.kz/cam1/index.m3u8?cookieCheck=1", source_type="hls", fps_limit=2),
         CameraSource(id="cam-public-caltrans-hammer", name="Caltrans — публичная дорожная камера / ашық жол камерасы",
             location="США · публичная дорожная камера / АҚШ · ашық жол камерасы",
             url="https://cwwp2.dot.ca.gov/data/d10/cctv/cctvStatusD10.json", source_type="hls", fps_limit=2),
@@ -110,6 +113,7 @@ def default_sources() -> list[CameraSource]:
 
 
 PUBLIC_SOURCE_PAGES = {
+    "cam-public-khanshatyr-left": "https://www.khanshatyr.com/ru/camera",
     "cam-public-caltrans-hammer": "https://dot.ca.gov/programs/traffic-operations/traveler-information/cwwp",
     "cam-public-yellowstone-arch": "https://www.nps.gov/media/webcam/view.htm?id=81B468BC-1DD8-B71B-0BBA4C383E179188",
     "cam-public-yellowstone-electric": "https://www.nps.gov/media/webcam/view.htm?id=81B468AB-1DD8-B71B-0BE84D8E8E0F1112",
