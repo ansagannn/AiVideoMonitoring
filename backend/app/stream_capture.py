@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -291,7 +292,16 @@ class HlsCapture:
     def _errors(self):
         for line in iter(self.process.stderr.readline, b""):
             # Do not log URLs, which can contain camera credentials.
-            self.error = "FFmpeg could not decode the HLS stream"
+            message = line.decode("utf-8", errors="replace")
+            http = re.search(r"(?:HTTP error |Server returned )(\d{3})", message)
+            reason = f"HTTP {http.group(1)}" if http else next((r for r in (
+                "Connection timed out", "Connection refused", "Invalid data found",
+                "Protocol not found", "Option not found", "Input/output error",
+                "Error while opening decoder", "No route to host", "End of file",
+                "TLS handshake failed", "Certificate verification failed") if r.lower() in message.lower()), None)
+            self.error = reason or "FFmpeg could not decode the HLS stream"
+            if reason:
+                logger.warning("Public HLS capture: %s", reason)
         if self.process.poll() not in (None, 0):
             logger.warning("HLS decoder exited with code %s", self.process.returncode)
 
