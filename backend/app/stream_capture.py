@@ -196,7 +196,7 @@ def grab_frame(source: StreamSource) -> CapturedFrame | None:
             numpy_frame=frame,
         )
 
-    if source.stream_type == "hls":
+    if source.stream_type in {"hls", "live_mjpeg"}:
         raw = _grab_hls_frame(source.camera_id, source.url)
     elif source.stream_type == "rtsp" or source.url.startswith("rtsp://"):
         raw = _grab_video_frame(source.camera_id, source.url)

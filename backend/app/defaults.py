@@ -107,6 +107,14 @@ def default_sources() -> list[CameraSource]:
             ],
         ),
     ]
+    operator_url = os.getenv("AI_MONITOR_OPERATOR_MJPEG_URL", "").strip()
+    if operator_url:
+        sources.insert(0, CameraSource(
+            id="cam-public-operator-212604",
+            name="Камера 212604 — прямой эфир / тікелей эфир",
+            location="Камера владельца · MJPEG / Иесінің камерасы · MJPEG",
+            url=operator_url, source_type="live_mjpeg", fps_limit=2,
+        ))
     if os.getenv("AI_MONITOR_PUBLIC_ONLY") == "1":
         return [source for source in sources if source.id.startswith("cam-public-")]
     return sources
@@ -126,7 +134,9 @@ PUBLIC_VIDEO_SOURCES: list[PublicVideoSource] = [
         camera_id=source.id,
         source_url=source.url,
         scenario=source.location,
-        license_note=("Официально опубликованная публичная камера. Страница владельца: " + PUBLIC_SOURCE_PAGES[source.id]
+        license_note=("Подключено оператором с заявленным разрешением владельца."
+            if source.id == "cam-public-operator-212604" else
+            "Официально опубликованная публичная камера. Страница владельца: " + PUBLIC_SOURCE_PAGES[source.id]
             if source.id in PUBLIC_SOURCE_PAGES else "Local synthetic scene or operator-configured stream."),
         supported_signals=(["person detection"] if source.source_type == "jpeg_snapshot"
             else ["person detection", "presence", "absence", "zone dwell"]),

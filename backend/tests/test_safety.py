@@ -169,6 +169,21 @@ def test_public_sources_and_hls_capture_dispatch():
         mjpeg.assert_not_called()
 
 
+def test_operator_mjpeg_uses_configured_url_and_nonblocking_capture(monkeypatch):
+    from defaults import default_sources
+    monkeypatch.setenv('AI_MONITOR_PUBLIC_ONLY', '1')
+    monkeypatch.setenv('AI_MONITOR_OPERATOR_MJPEG_URL', 'http://camera.example:8090/mjpg/video.mjpg')
+    camera = next(s for s in default_sources() if s.id == 'cam-public-operator-212604')
+    assert camera.enabled and camera.source_type == 'live_mjpeg'
+    assert camera.url == 'http://camera.example:8090/mjpg/video.mjpg'
+    _, jpeg = cv2.imencode('.jpg', np.zeros((40,60,3), dtype=np.uint8))
+    with patch('stream_capture._grab_hls_frame', return_value=jpeg.tobytes()) as video, patch('stream_capture._grab_mjpeg_frame') as blocking:
+        frame = grab_frame(StreamSource(camera.id, camera.name, camera.url, camera.source_type))
+        assert frame.width == 60 and frame.height == 40
+        video.assert_called_once_with(camera.id, camera.url)
+        blocking.assert_not_called()
+
+
 def test_snapshot_readiness_respects_minute_refresh():
     import time
     from readiness import camera_status
