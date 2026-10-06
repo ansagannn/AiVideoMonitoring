@@ -183,3 +183,18 @@ def test_snapshot_readiness_respects_minute_refresh():
     assert result['stream_connected'] and result['ai_ready']
     assert not result['action_analysis_available']
     assert result['capture_interval_seconds'] == 60
+
+
+def test_free_demo_skips_yolo_import(monkeypatch):
+    from analyzer import _get_model
+    import builtins
+    original = builtins.__import__
+    def guarded(name, *args, **kwargs):
+        assert name != 'ultralytics'
+        return original(name, *args, **kwargs)
+    monkeypatch.setenv('AI_MONITOR_DISABLE_INFERENCE','1')
+    with patch('builtins.__import__', side_effect=guarded):
+        assert _get_model() is None
+    monkeypatch.setenv('AI_MONITOR_PUBLIC_ONLY','1')
+    from defaults import default_sources
+    assert all(s.id.startswith('cam-public-') for s in default_sources())

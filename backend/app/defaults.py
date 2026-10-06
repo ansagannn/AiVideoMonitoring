@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import os
+
 from models import CameraSource, DetectionCapability, MonitoringSettings, PublicVideoSource, Zone
 
 DEFAULT_SETTINGS = MonitoringSettings()
 
 
 def default_sources() -> list[CameraSource]:
-    return [
+    sources = [
         CameraSource(id="cam-public-rtsp-kz", name="RTSP.KZ — публичное демо / ашық демо",
             location="Публичный HLS-поток / Ашық HLS ағыны",
             url="https://rtsp.kz/hls/demo/stream.m3u8", source_type="hls", fps_limit=2),
@@ -102,6 +104,9 @@ def default_sources() -> list[CameraSource]:
             ],
         ),
     ]
+    if os.getenv("AI_MONITOR_PUBLIC_ONLY") == "1":
+        return [source for source in sources if source.id.startswith("cam-public-")]
+    return sources
 
 
 PUBLIC_SOURCE_PAGES = {

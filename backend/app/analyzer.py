@@ -20,6 +20,8 @@ _PERSON_CLASS_ID = 0  # COCO class 0 = person
 
 def _get_model():
     global _model, _model_failed
+    if os.getenv("AI_MONITOR_DISABLE_INFERENCE") == "1":
+        return None
     if _model_failed:
         return None
     if _model is None:
