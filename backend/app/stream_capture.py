@@ -1,8 +1,7 @@
-"""Capture frames from public MJPEG / JPEG webcam streams."""
+"""Capture frames from public MJPEG / JPEG webcam streams + synthetic retail scenes."""
 
 from __future__ import annotations
 
-import io
 import logging
 import threading
 import time
@@ -13,6 +12,8 @@ from urllib.request import Request, urlopen
 
 import cv2
 import numpy as np
+
+from retail_scenes import render_scene_frame
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class StreamSource:
     camera_id: str
     name: str
     url: str
-    stream_type: str = "mjpeg"  # mjpeg | jpeg_snapshot
+    stream_type: str = "mjpeg"  # mjpeg | jpeg_snapshot | retail_scene
 
 
 @dataclass
@@ -42,44 +43,58 @@ class CapturedFrame:
             self.height, self.width = self.numpy_frame.shape[:2]
 
 
-LIVE_STREAMS: list[StreamSource] = [
+# Public MJPEG sources are kept as opportunistic fallbacks. Many of them are
+# flaky or geo-restricted, so the dashboard's primary cameras are now the
+# synthetic retail scenes below.
+PUBLIC_MJPEG_STREAMS: list[StreamSource] = [
     StreamSource(
         camera_id="cam-buffalo-trace",
         name="Buffalo Trace Factory (USA)",
         url="http://camera.buffalotrace.com/mjpg/video.mjpg",
         stream_type="mjpeg",
     ),
+]
+
+RETAIL_SCENE_STREAMS: list[StreamSource] = [
     StreamSource(
-        camera_id="cam-purdue-mall",
-        name="Purdue Engineering Mall (USA)",
-        url="http://webcam01.ecn.purdue.edu/mjpg/video.mjpg",
-        stream_type="mjpeg",
+        camera_id="cam-hypermarket-frozen",
+        name="Hypermarket — Frozen Aisle",
+        url="retail-scene://cam-hypermarket-frozen",
+        stream_type="retail_scene",
     ),
     StreamSource(
-        camera_id="cam-kirchhoff-physics",
-        name="Kirchhoff Institute Physics (Germany)",
-        url="http://pendelcam.kip.uni-heidelberg.de/mjpg/video.mjpg",
-        stream_type="mjpeg",
+        camera_id="cam-supermarket-produce",
+        name="Supermarket — Fresh Produce",
+        url="retail-scene://cam-supermarket-produce",
+        stream_type="retail_scene",
     ),
     StreamSource(
-        camera_id="cam-hotel-lobby",
-        name="Hotel Lobby CCTV",
-        url="http://158.58.130.148/mjpg/video.mjpg",
-        stream_type="mjpeg",
+        camera_id="cam-supermarket-beverage",
+        name="Supermarket — Beverages Aisle",
+        url="retail-scene://cam-supermarket-beverage",
+        stream_type="retail_scene",
     ),
     StreamSource(
-        camera_id="cam-pajala-sweden",
-        name="Soltorget Pajala (Sweden)",
-        url="http://195.196.36.242/mjpg/video.mjpg",
-        stream_type="mjpeg",
+        camera_id="cam-supermarket-checkout",
+        name="Supermarket — Checkout Lanes",
+        url="retail-scene://cam-supermarket-checkout",
+        stream_type="retail_scene",
     ),
     StreamSource(
-        camera_id="cam-piano-japan",
-        name="Piano Factory (Japan)",
-        url="http://takemotopiano.aa1.netvolante.jp:8190/nphMotionJpeg?Resolution=640x480&Quality=Standard&Framerate=30",
-        stream_type="mjpeg",
+        camera_id="cam-warehouse-stock",
+        name="Warehouse — Stock Backroom",
+        url="retail-scene://cam-warehouse-stock",
+        stream_type="retail_scene",
+    ),
+    StreamSource(
+        camera_id="cam-mall-entrance",
+        name="Shopping Mall — Main Entrance",
+        url="retail-scene://cam-mall-entrance",
+        stream_type="retail_scene",
     ),
 ]
+
+LIVE_STREAMS: list[StreamSource] = RETAIL_SCENE_STREAMS + PUBLIC_MJPEG_STREAMS
 
 
 def _grab_jpeg_snapshot(url: str) -> bytes | None:
@@ -122,9 +137,63 @@ def _grab_mjpeg_frame(url: str) -> bytes | None:
         return None
 
 
+_captures: dict[str, tuple[str, object]] = {}
+
+
+def close_captures(active_ids=None):
+    for camera_id in list(_captures):
+        if active_ids is None or camera_id not in active_ids:
+            _captures.pop(camera_id)[1].release()
+
+
+def _grab_video_frame(camera_id: str, url: str, loop: bool = False) -> bytes | None:
+    entry = _captures.get(camera_id)
+    if entry and entry[0] != url:
+        entry[1].release()
+        entry = None
+    if entry is None:
+        capture = cv2.VideoCapture()
+        capture.open(url, cv2.CAP_FFMPEG, [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000])
+        _captures[camera_id] = (url, capture)
+    else:
+        capture = entry[1]
+    if not capture.isOpened():
+        close_captures(set(_captures) - {camera_id})
+        return None
+    success, frame = capture.read()
+    if not success and loop:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        success, frame = capture.read()
+    if not success or frame is None:
+        close_captures(set(_captures) - {camera_id})
+        return None
+    _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return jpeg.tobytes()
+
+
 def grab_frame(source: StreamSource) -> CapturedFrame | None:
     """Grab one frame from a stream source and return it."""
-    if source.stream_type == "jpeg_snapshot":
+    if source.stream_type == "retail_scene" or source.url.startswith("retail-scene://"):
+        # Allow using a retail-scene URL that names a different scene than the
+        # camera id (e.g. url="retail-scene://cam-mall-entrance"). Extract the
+        # scene id from the URL when present; fall back to the camera id.
+        scene_id = source.url.split("://", 1)[1] if "//" in source.url else source.camera_id
+        frame = render_scene_frame(scene_id)
+        if frame is None:
+            logger.warning("Retail scene %s returned no frame", source.camera_id)
+            return None
+        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return CapturedFrame(
+            camera_id=source.camera_id,
+            jpeg_bytes=jpeg.tobytes(),
+            numpy_frame=frame,
+        )
+
+    if source.stream_type in {"rtsp", "hls"} or source.url.startswith("rtsp://"):
+        raw = _grab_video_frame(source.camera_id, source.url)
+    elif source.stream_type in {"demo_video", "public_dataset", "public_webcam_archive"}:
+        raw = _grab_video_frame(source.camera_id, source.url, loop=True)
+    elif source.stream_type == "jpeg_snapshot":
         raw = _grab_jpeg_snapshot(source.url)
     else:
         raw = _grab_mjpeg_frame(source.url)

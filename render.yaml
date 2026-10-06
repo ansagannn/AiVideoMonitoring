@@ -1,0 +1,28 @@
+# Paid configuration. Review Render's price before applying this Blueprint.
+services:
+  - type: web
+    name: ai-camera-safety-api
+    runtime: docker
+    plan: 1c-2g
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -c 'mkdir -p /data/models && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1'
+    healthCheckPath: /healthz
+    envVars:
+      - key: AI_MONITORING_DB_PATH
+        value: /data/monitoring.db
+      - key: AI_MONITOR_YOLO_MODEL
+        value: /data/models/yolov8n.pt
+      - key: AI_MONITOR_YOLO_AUTO_DOWNLOAD
+        value: "1"
+      - key: AI_MONITOR_PASSWORD_ADMIN
+        sync: false
+      - key: AI_MONITOR_PASSWORD_MANAGER
+        sync: false
+      - key: AI_MONITOR_PASSWORD_OPERATOR
+        sync: false
+    disk:
+      name: safety-data
+      mountPath: /data
+      sizeGB: 1

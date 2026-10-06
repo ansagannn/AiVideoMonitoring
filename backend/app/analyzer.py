@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -12,16 +14,35 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _model = None
+_model_failed = False
 _PERSON_CLASS_ID = 0  # COCO class 0 = person
 
 
 def _get_model():
-    global _model
+    global _model, _model_failed
+    if _model_failed:
+        return None
     if _model is None:
-        from ultralytics import YOLO
-        logger.info("Loading YOLOv8n model...")
-        _model = YOLO("yolov8n.pt")
-        logger.info("YOLOv8n model loaded.")
+        try:
+            from ultralytics import YOLO
+            default_model_path = Path(__file__).resolve().parents[1] / "models" / "yolov8n.pt"
+            model_path = Path(os.getenv("AI_MONITOR_YOLO_MODEL", str(default_model_path)))
+            auto_download = os.getenv("AI_MONITOR_YOLO_AUTO_DOWNLOAD", "0") == "1"
+            if not model_path.exists() and not auto_download:
+                _model_failed = True
+                logger.warning(
+                    "YOLO model %s was not found; set AI_MONITOR_YOLO_AUTO_DOWNLOAD=1 "
+                    "or place the model file locally to enable detection.",
+                    model_path,
+                )
+                return None
+            logger.info("Loading YOLOv8n model...")
+            _model = YOLO(str(model_path))
+            logger.info("YOLOv8n model loaded.")
+        except Exception as exc:
+            _model_failed = True
+            logger.warning("YOLOv8n is unavailable; analysis will run in fallback mode: %s", exc)
+            return None
     return _model
 
 
@@ -48,6 +69,7 @@ class Detection:
 class AnalysisResult:
     camera_id: str
     detections: list[Detection] = field(default_factory=list)
+    model_available: bool = False
     person_count: int = 0
     analyzed_at: float = field(default_factory=time.time)
     inference_ms: float = 0.0
@@ -63,9 +85,29 @@ def analyze_frame(camera_id: str, frame: np.ndarray, confidence_threshold: float
     """Run YOLOv8 detection on a frame and return results."""
     model = _get_model()
     h, w = frame.shape[:2]
+    if model is None:
+        return AnalysisResult(
+            camera_id=camera_id,
+            detections=[],
+            person_count=0,
+            inference_ms=0.0,
+            frame_width=w,
+            frame_height=h,
+        )
 
     t0 = time.time()
-    results = model(frame, verbose=False, conf=confidence_threshold)
+    try:
+        results = model(frame, verbose=False, conf=confidence_threshold)
+    except Exception as exc:
+        logger.warning("YOLO inference failed for %s; using empty fallback result: %s", camera_id, exc)
+        return AnalysisResult(
+            camera_id=camera_id,
+            detections=[],
+            person_count=0,
+            inference_ms=0.0,
+            frame_width=w,
+            frame_height=h,
+        )
     inference_ms = (time.time() - t0) * 1000
 
     detections: list[Detection] = []
@@ -96,6 +138,7 @@ def analyze_frame(camera_id: str, frame: np.ndarray, confidence_threshold: float
 
     return AnalysisResult(
         camera_id=camera_id,
+        model_available=True,
         detections=detections,
         person_count=person_count,
         inference_ms=inference_ms,

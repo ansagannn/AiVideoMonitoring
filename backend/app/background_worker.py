@@ -17,8 +17,10 @@ from stream_capture import (
 
 logger = logging.getLogger(__name__)
 
-CAPTURE_INTERVAL = 15  # seconds between frame grabs per camera
-ANALYSIS_INTERVAL = 20  # seconds between AI analysis per camera
+RETAIL_CAPTURE_INTERVAL = 1.0   # local scenes are cheap, animate ~1 Hz
+REMOTE_CAPTURE_INTERVAL = 15.0  # remote MJPEG is expensive / rate-limited
+ANALYSIS_INTERVAL = 5.0         # YOLO analysis cadence per camera
+ANALYSIS_WARMUP_SECONDS = 2.0   # wait briefly so first frames exist
 
 
 @dataclass
@@ -48,6 +50,8 @@ class AnalysisCache:
 
 
 _analysis_cache = AnalysisCache()
+_workers_started = False
+_workers_lock = threading.Lock()
 
 
 def get_analysis_cache() -> AnalysisCache:
@@ -55,9 +59,19 @@ def get_analysis_cache() -> AnalysisCache:
 
 
 def _capture_loop(sources: list[StreamSource], frame_cache: FrameCache) -> None:
-    """Continuously capture frames from all sources."""
+    """Continuously capture frames from all sources.
+
+    Synthetic retail scenes are rendered every RETAIL_CAPTURE_INTERVAL seconds
+    so motion looks live; remote MJPEG cameras are polled every
+    REMOTE_CAPTURE_INTERVAL seconds to avoid hammering public servers.
+    """
+    last_remote: dict[str, float] = {s.camera_id: 0.0 for s in sources}
     while True:
+        now = time.time()
         for source in sources:
+            is_remote = source.stream_type != "retail_scene"
+            if is_remote and (now - last_remote.get(source.camera_id, 0.0) < REMOTE_CAPTURE_INTERVAL):
+                continue
             try:
                 frame = grab_frame(source)
                 if frame is not None:
@@ -67,12 +81,15 @@ def _capture_loop(sources: list[StreamSource], frame_cache: FrameCache) -> None:
                     logger.debug("No frame from %s", source.camera_id)
             except Exception as exc:
                 logger.error("Capture error for %s: %s", source.camera_id, exc)
-        time.sleep(CAPTURE_INTERVAL)
+            finally:
+                if is_remote:
+                    last_remote[source.camera_id] = time.time()
+        time.sleep(RETAIL_CAPTURE_INTERVAL)
 
 
 def _analysis_loop(sources: list[StreamSource], frame_cache: FrameCache, analysis_cache: AnalysisCache) -> None:
     """Continuously analyze cached frames with YOLOv8."""
-    time.sleep(5)  # wait for initial frames
+    time.sleep(ANALYSIS_WARMUP_SECONDS)
     while True:
         for source in sources:
             try:
@@ -94,10 +111,17 @@ def _analysis_loop(sources: list[StreamSource], frame_cache: FrameCache, analysi
 
 def start_workers(sources: list[StreamSource] | None = None) -> None:
     """Start capture and analysis threads."""
+    global _workers_started
     from stream_capture import LIVE_STREAMS
 
     if sources is None:
         sources = LIVE_STREAMS
+
+    with _workers_lock:
+        if _workers_started:
+            logger.info("Background workers already started; skipping duplicate start")
+            return
+        _workers_started = True
 
     frame_cache = FrameCache.get_instance()
     analysis_cache = get_analysis_cache()
